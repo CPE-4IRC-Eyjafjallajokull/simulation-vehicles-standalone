@@ -100,11 +100,11 @@ public final class SerialUartGateway implements UartGateway {
             continue;
           }
           for (int i = 0; i < read; i++) {
-            char ch = (char) buffer[i];
-            if (ch == '\r') {
+            int raw = buffer[i] & 0xFF;
+            if (raw == '\r') {
               continue;
             }
-            if (ch == '\n') {
+            if (raw == '\n') {
               String line = lineBuffer.toString().trim();
               lineBuffer.setLength(0);
               if (line.isEmpty()) {
@@ -117,8 +117,9 @@ public final class SerialUartGateway implements UartGateway {
                 // logger.warn("Message UART invalide: " + e.getMessage());
                 continue;
               }
-            } else {
-              lineBuffer.append(ch);
+            } else if (raw >= 0x20 && raw <= 0x7E) {
+              // Drop non-ASCII noise (e.g., 0xFF) to avoid corrupting CSV frames.
+              lineBuffer.append((char) raw);
             }
           }
         } catch (IOException e) {
