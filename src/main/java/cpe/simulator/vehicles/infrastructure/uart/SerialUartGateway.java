@@ -14,6 +14,9 @@ import java.nio.charset.StandardCharsets;
 /** Implementation UART basee sur jSerialComm. */
 public final class SerialUartGateway implements UartGateway {
 
+  private static final int MAX_LINE_LENGTH = 256;
+  private static final int READ_BUFFER_SIZE = 256;
+
   private final String portName;
   private final int baudRate;
   private final long reconnectMs;
@@ -88,8 +91,10 @@ public final class SerialUartGateway implements UartGateway {
         continue;
       }
 
-      byte[] buffer = new byte[256];
-      StringBuilder lineBuffer = new StringBuilder();
+      byte[] buffer = new byte[READ_BUFFER_SIZE];
+      byte[] lineBuffer = new byte[MAX_LINE_LENGTH];
+      int lineLength = 0;
+      boolean overflow = false;
       while (running) {
         try {
           int read = input.read(buffer);
@@ -97,6 +102,7 @@ public final class SerialUartGateway implements UartGateway {
             throw new IOException("UART closed");
           }
           if (read == 0) {
+            sleep(1);
             continue;
           }
           for (int i = 0; i < read; i++) {
@@ -105,21 +111,30 @@ public final class SerialUartGateway implements UartGateway {
               continue;
             }
             if (raw == '\n') {
-              String line = lineBuffer.toString().trim();
-              lineBuffer.setLength(0);
-              if (line.isEmpty()) {
-                continue;
+              if (overflow) {
+                overflow = false;
+              } else if (lineLength > 0) {
+                String line = new String(lineBuffer, 0, lineLength, StandardCharsets.US_ASCII);
+                try {
+                  UartMessage message = parser.parse(line);
+                  listener.onMessage(message);
+                } catch (IllegalArgumentException e) {
+                  // logger.warn("Message UART invalide: " + e.getMessage());
+                  continue;
+                }
               }
-              try {
-                UartMessage message = parser.parse(line);
-                listener.onMessage(message);
-              } catch (IllegalArgumentException e) {
-                // logger.warn("Message UART invalide: " + e.getMessage());
-                continue;
-              }
+              lineLength = 0;
             } else if (raw >= 0x20 && raw <= 0x7E) {
               // Drop non-ASCII noise (e.g., 0xFF) to avoid corrupting CSV frames.
-              lineBuffer.append((char) raw);
+              if (overflow) {
+                continue;
+              }
+              if (lineLength < MAX_LINE_LENGTH) {
+                lineBuffer[lineLength++] = (byte) raw;
+              } else {
+                overflow = true;
+                lineLength = 0;
+              }
             }
           }
         } catch (IOException e) {

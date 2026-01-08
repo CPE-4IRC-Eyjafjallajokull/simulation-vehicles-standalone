@@ -34,6 +34,7 @@ public final class VehicleSimulator {
   private final Map<String, Long> lastPositionSendMs = new HashMap<>();
   private final Map<String, Long> lastStatusSendMs = new HashMap<>();
   private final Map<String, VehicleStatus> lastSentStatus = new HashMap<>();
+  private final Map<String, VehicleStatus> lastObservedStatus = new HashMap<>();
   private final Map<String, Long> returnRoutePendingMs = new HashMap<>();
 
   public VehicleSimulator(
@@ -86,6 +87,7 @@ public final class VehicleSimulator {
         long timestampSeconds = nowMs / 1_000L;
 
         for (VehicleSnapshot snapshot : fleet.advanceAll(movementModel, tickSeconds)) {
+          logStatusChange(snapshot);
           handleStatusTransitions(snapshot, nowMs);
           sendPositionIfNeeded(snapshot, nowMs, timestampSeconds);
           sendStatusIfNeeded(snapshot, nowMs, timestampSeconds);
@@ -163,9 +165,28 @@ public final class VehicleSimulator {
     boolean intervalElapsed = lastSend == null || nowMs - lastSend >= statusSendIntervalMs;
 
     if (statusChanged || intervalElapsed) {
-      sendStatusMessage(snapshot, timestampSeconds);
+      UartMessage message = sendStatusMessage(snapshot, timestampSeconds);
+      if (statusChanged) {
+        logger.info("UART STATUS CHANGE >> " + uartParser.serialize(message));
+      }
       lastStatusSendMs.put(immat, nowMs);
       lastSentStatus.put(immat, currentStatus);
+    }
+  }
+
+  private void logStatusChange(VehicleSnapshot snapshot) {
+    String immat = snapshot.immatriculation();
+    VehicleStatus currentStatus = snapshot.status();
+    VehicleStatus previousStatus = lastObservedStatus.put(immat, currentStatus);
+
+    if (previousStatus != null && previousStatus != currentStatus) {
+      logger.info(
+          "Changement de status vehicule "
+              + immat
+              + ": "
+              + previousStatus
+              + " -> "
+              + currentStatus);
     }
   }
 
@@ -183,7 +204,7 @@ public final class VehicleSimulator {
     }
   }
 
-  private void sendStatusMessage(VehicleSnapshot snapshot, long timestampSeconds) {
+  private UartMessage sendStatusMessage(VehicleSnapshot snapshot, long timestampSeconds) {
     UartMessage message =
         UartMessage.position(
             statusEvent,
@@ -195,6 +216,7 @@ public final class VehicleSimulator {
     if (logSends) {
       logger.info("UART >> " + uartParser.serialize(message));
     }
+    return message;
   }
 
   private long positionSendIntervalMs(VehicleSnapshot snapshot) {
