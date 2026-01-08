@@ -31,11 +31,16 @@ public record SimulatorConfig(
     int uartReadTimeoutMs,
     long uartWriteDelayMs,
     long uartBaseSendIntervalMs,
-    long uartAssignmentSendIntervalMs,
+    long uartMovingSendIntervalMs,
+    long uartStatusSendIntervalMs,
     String uartEventPosition,
+    String uartEventStatus,
     String uartEventAffectation,
     boolean routeSnapStart,
-    boolean uartLogSends) {
+    boolean uartLogSends,
+
+    // Intervention
+    long onSiteDurationMs) {
 
   public static SimulatorConfig fromEnvironment() {
     Map<String, String> env = loadEnv();
@@ -57,11 +62,14 @@ public record SimulatorConfig(
         parseInt(env, "UART_READ_TIMEOUT_MS", 1_000),
         parseLong(env, "UART_WRITE_DELAY_MS", 10L),
         parseLong(env, "UART_BASE_SEND_INTERVAL_MS", 60_000L),
-        parseLong(env, "UART_ASSIGNMENT_SEND_INTERVAL_MS", 500L),
+        parseLong(env, "UART_MOVING_SEND_INTERVAL_MS", 500L),
+        parseLong(env, "UART_STATUS_SEND_INTERVAL_MS", 5_000L),
         env.getOrDefault("UART_EVENT_POSITION", "vehicle_position"),
+        env.getOrDefault("UART_EVENT_STATUS", "vehicle_status"),
         env.getOrDefault("UART_EVENT_AFFECTATION", "vehicle_affectation"),
         parseBoolean(env, "ROUTE_SNAP_START", true),
-        parseBoolean(env, "UART_LOG_SENDS", false));
+        parseBoolean(env, "UART_LOG_SENDS", false),
+        parseLong(env, "ON_SITE_DURATION_MS", 60_000L));
   }
 
   private static Map<String, String> loadEnv() {

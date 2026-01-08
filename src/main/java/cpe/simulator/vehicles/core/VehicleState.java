@@ -1,6 +1,7 @@
 package cpe.simulator.vehicles.core;
 
 import cpe.simulator.vehicles.domain.GeoPoint;
+import cpe.simulator.vehicles.domain.VehicleStatus;
 
 /** Etat mutable d'un vehicule pour la simulation. */
 public final class VehicleState {
@@ -10,6 +11,8 @@ public final class VehicleState {
   private GeoPoint position;
   private GeoPoint assignmentTarget;
   private RoutePlan routePlan;
+  private VehicleStatus status = VehicleStatus.DISPONIBLE;
+  private long arrivedAtTargetMs = -1;
 
   public VehicleState(String immatriculation, GeoPoint base, GeoPoint position) {
     this.immatriculation = immatriculation;
@@ -22,12 +25,39 @@ public final class VehicleState {
   }
 
   public synchronized VehicleSnapshot snapshot() {
-    return new VehicleSnapshot(immatriculation, position, base, assignmentTarget);
+    return new VehicleSnapshot(immatriculation, position, base, assignmentTarget, status, arrivedAtTargetMs);
   }
 
   public synchronized void setAssignment(GeoPoint target, RoutePlan plan) {
     this.assignmentTarget = target;
     this.routePlan = plan;
+    this.status = VehicleStatus.ENGAGE;
+    this.arrivedAtTargetMs = -1;
+  }
+
+  public synchronized void setStatus(VehicleStatus newStatus) {
+    this.status = newStatus;
+  }
+
+  public synchronized void markArrivedAtTarget(long timestampMs) {
+    if (arrivedAtTargetMs < 0) {
+      arrivedAtTargetMs = timestampMs;
+      status = VehicleStatus.SUR_INTERVENTION;
+    }
+  }
+
+  public synchronized void startReturn() {
+    status = VehicleStatus.RETOUR;
+    arrivedAtTargetMs = -1;
+    // Ne pas modifier assignmentTarget ni routePlan ici
+    // Ils vont être mis à jour par startReturnWithRoute si une route est disponible
+  }
+
+  public synchronized void startReturnWithRoute(RoutePlan returnPlan) {
+    this.routePlan = returnPlan;
+    this.assignmentTarget = base;
+    this.status = VehicleStatus.RETOUR;
+    this.arrivedAtTargetMs = -1;
   }
 
   public synchronized VehicleSnapshot advance(MovementModel model, double deltaSeconds) {
@@ -51,7 +81,9 @@ public final class VehicleState {
   }
 
   public synchronized void assignToBase() {
-    this.assignmentTarget = base;
+    this.assignmentTarget = null;
     this.routePlan = null;
+    this.status = VehicleStatus.DISPONIBLE;
+    this.arrivedAtTargetMs = -1;
   }
 }

@@ -61,11 +61,38 @@ public final class Fleet {
     return true;
   }
 
+  public boolean markArrivedAtTarget(String immatriculation, long timestampMs) {
+    VehicleState state = vehicles.get(immatriculation);
+    if (state == null) {
+      return false;
+    }
+    state.markArrivedAtTarget(timestampMs);
+    return true;
+  }
+
+  public boolean startReturn(String immatriculation) {
+    VehicleState state = vehicles.get(immatriculation);
+    if (state == null) {
+      return false;
+    }
+    state.startReturn();
+    return true;
+  }
+
   public List<VehicleSnapshot> advanceAll(MovementModel model, double deltaSeconds) {
     List<VehicleSnapshot> list = new ArrayList<>(vehicles.size());
     for (VehicleState state : vehicles.values()) {
       list.add(state.advance(model, deltaSeconds));
     }
     return list;
+  }
+
+  public boolean startReturnWithRoute(String immatriculation, RoutePlan returnPlan) {
+    VehicleState state = vehicles.get(immatriculation);
+    if (state == null) {
+      return false;
+    }
+    state.startReturnWithRoute(returnPlan);
+    return true;
   }
 }

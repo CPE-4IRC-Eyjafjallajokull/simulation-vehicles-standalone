@@ -6,6 +6,7 @@ import java.util.Locale;
 public final class UartMessageParser {
 
   private static final long MAX_TIMESTAMP_SECONDS = 0xFFFF_FFFFL;
+  private static final int MAX_STATUS = 255;
 
   public UartMessage parse(String line) {
     if (line == null) {
@@ -17,16 +18,17 @@ public final class UartMessageParser {
     }
 
     String[] parts = trimmed.split(",");
-    if (parts.length != 5) {
+    if (parts.length != 6) {
       throw new IllegalArgumentException(
-          "Invalid UART frame, expected 5 fields: " + trimmed);
+          "Invalid UART frame, expected 6 fields: " + trimmed);
     }
 
     String event = parts[0].trim();
-    String immatriculation = normalizeIncomingImmatriculation(parts[1]);
-    double latitude = parseDouble(parts[2].trim(), "latitude", trimmed);
-    double longitude = parseDouble(parts[3].trim(), "longitude", trimmed);
-    long timestampSeconds = parseTimestamp(parts[4].trim(), trimmed);
+    int status = parseStatus(parts[1].trim(), trimmed);
+    String immatriculation = normalizeIncomingImmatriculation(parts[2]);
+    double latitude = parseDouble(parts[3].trim(), "latitude", trimmed);
+    double longitude = parseDouble(parts[4].trim(), "longitude", trimmed);
+    long timestampSeconds = parseTimestamp(parts[5].trim(), trimmed);
 
     if (event.isEmpty()) {
       throw new IllegalArgumentException("Missing event in UART frame: " + trimmed);
@@ -35,7 +37,7 @@ public final class UartMessageParser {
       throw new IllegalArgumentException("Missing immatriculation in UART frame: " + trimmed);
     }
 
-    return new UartMessage(event, immatriculation, latitude, longitude, timestampSeconds);
+    return new UartMessage(event, status, immatriculation, latitude, longitude, timestampSeconds);
   }
 
   public String serialize(UartMessage message) {
@@ -45,12 +47,25 @@ public final class UartMessageParser {
     String immatriculation = toUartImmatriculation(message.immatriculation());
     return String.format(
         Locale.US,
-        "%s,%s,%.6f,%.6f,%d",
+        "%s,%d,%s,%.6f,%.6f,%d",
         message.event(),
+        message.status(),
         immatriculation,
         message.latitude(),
         message.longitude(),
         message.timestampSeconds());
+  }
+
+  private int parseStatus(String raw, String line) {
+    try {
+      int value = Integer.parseInt(raw);
+      if (value < 0 || value > MAX_STATUS) {
+        throw new IllegalArgumentException("Status out of range in UART frame: " + line);
+      }
+      return value;
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException("Invalid status in UART frame: " + line, e);
+    }
   }
 
   private double parseDouble(String raw, String label, String line) {

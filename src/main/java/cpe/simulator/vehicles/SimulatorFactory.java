@@ -74,9 +74,14 @@ public final class SimulatorFactory {
         Clock.systemUTC(),
         config.simTickMs(),
         config.uartBaseSendIntervalMs(),
-        config.uartAssignmentSendIntervalMs(),
+        config.uartMovingSendIntervalMs(),
+        config.uartStatusSendIntervalMs(),
+        config.onSiteDurationMs(),
         config.uartEventPosition(),
-        config.uartLogSends());
+        config.uartEventStatus(),
+        config.uartLogSends(),
+        routeService,
+        config.routeSnapStart());
   }
 
   private static HttpClient createHttpClient(SimulatorConfig config) {
