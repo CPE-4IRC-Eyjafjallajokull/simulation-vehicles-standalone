@@ -78,7 +78,8 @@ public final class SimulatorFactory {
         config.uartStatusSendIntervalMs(),
         config.onSiteDurationMs(),
         config.uartEventPosition(),
-        config.uartEventStatus(),
+        config.uartEventVehicleStatus(),
+        config.uartEventIncidentStatus(),
         config.uartLogSends(),
         routeService,
         config.routeSnapStart());

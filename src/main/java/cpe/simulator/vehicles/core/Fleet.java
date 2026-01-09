@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class Fleet {
 
   private final Map<String, VehicleState> vehicles = new ConcurrentHashMap<>();
+  private final IncidentCoordinator incidentCoordinator = new IncidentCoordinator();
   private final Logger logger;
 
   public Fleet(List<VehicleState> initial, Logger logger) {
@@ -18,7 +19,7 @@ public final class Fleet {
     for (VehicleState state : initial) {
       VehicleState existing = vehicles.putIfAbsent(state.immatriculation(), state);
       if (existing != null) {
-        logger.warn("Immatriculation en double ignoree: " + state.immatriculation());
+        logger.warn("Immatriculation en double ignorée: " + state.immatriculation());
       }
     }
   }
@@ -49,7 +50,12 @@ public final class Fleet {
       return false;
     }
     state.setAssignment(target, plan);
+    incidentCoordinator.registerVehicle(immatriculation, target);
     return true;
+  }
+
+  public IncidentCoordinator incidentCoordinator() {
+    return incidentCoordinator;
   }
 
   public boolean assignToBase(String immatriculation) {

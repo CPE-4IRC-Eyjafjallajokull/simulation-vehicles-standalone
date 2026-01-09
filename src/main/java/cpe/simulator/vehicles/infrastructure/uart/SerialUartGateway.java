@@ -16,6 +16,7 @@ public final class SerialUartGateway implements UartGateway {
 
   private static final int MAX_LINE_LENGTH = 256;
   private static final int READ_BUFFER_SIZE = 256;
+  private static final long MIN_SEND_INTERVAL_MS = 50; // Rate limit: max 20 msg/s
 
   private final String portName;
   private final int baudRate;
@@ -26,6 +27,7 @@ public final class SerialUartGateway implements UartGateway {
   private final Logger logger;
 
   private final Object writeLock = new Object();
+  private volatile long lastSendTimeMs = 0;
   private volatile boolean running;
   private Thread readerThread;
   private SerialPort port;
@@ -69,8 +71,16 @@ public final class SerialUartGateway implements UartGateway {
         return;
       }
       try {
+        // Rate limiting: enforce minimum interval between sends
+        long now = System.currentTimeMillis();
+        long elapsed = now - lastSendTimeMs;
+        if (elapsed < MIN_SEND_INTERVAL_MS) {
+          sleep(MIN_SEND_INTERVAL_MS - elapsed);
+        }
+
         output.write(payload);
         output.flush();
+        lastSendTimeMs = System.currentTimeMillis();
         sleep(writeDelayMs);
       } catch (IOException e) {
         logger.warn("Erreur ecriture UART: " + e.getMessage());

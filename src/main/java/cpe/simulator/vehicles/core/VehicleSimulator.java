@@ -10,6 +10,7 @@ import cpe.simulator.vehicles.uart.UartMessageParser;
 import java.time.Clock;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** Boucle principale de simulation des vehicules. */
 public final class VehicleSimulator {
@@ -25,8 +26,10 @@ public final class VehicleSimulator {
   private final long movingSendIntervalMs;
   private final long statusSendIntervalMs;
   private final long onSiteDurationMs;
-  private final String positionEvent;
-  private final String statusEvent;
+  private final long baseSendJitterMs;
+  private final String eventPosition;
+  private final String eventVehicleStatus;
+  private final String eventIncidentStatus;
   private final boolean logSends;
   private final UartMessageParser uartParser;
   private final RouteService routeService;
@@ -36,6 +39,7 @@ public final class VehicleSimulator {
   private final Map<String, VehicleStatus> lastSentStatus = new HashMap<>();
   private final Map<String, VehicleStatus> lastObservedStatus = new HashMap<>();
   private final Map<String, Long> returnRoutePendingMs = new HashMap<>();
+  private final Map<String, Long> baseSendOffsetsMs = new HashMap<>();
 
   public VehicleSimulator(
       Fleet fleet,
@@ -49,8 +53,9 @@ public final class VehicleSimulator {
       long movingSendIntervalMs,
       long statusSendIntervalMs,
       long onSiteDurationMs,
-      String positionEvent,
-      String statusEvent,
+      String eventPosition,
+      String eventVehicleStatus,
+      String eventIncidentStatus,
       boolean logSends,
       RouteService routeService,
       boolean routeSnapStart) {
@@ -65,8 +70,10 @@ public final class VehicleSimulator {
     this.movingSendIntervalMs = movingSendIntervalMs;
     this.statusSendIntervalMs = statusSendIntervalMs;
     this.onSiteDurationMs = onSiteDurationMs;
-    this.positionEvent = positionEvent;
-    this.statusEvent = statusEvent;
+    this.baseSendJitterMs = baseSendIntervalMs / 5;
+    this.eventPosition = eventPosition;
+    this.eventVehicleStatus = eventVehicleStatus;
+    this.eventIncidentStatus = eventIncidentStatus;
     this.logSends = logSends;
     this.routeService = routeService;
     this.routeSnapStart = routeSnapStart;
@@ -111,21 +118,27 @@ public final class VehicleSimulator {
     String immat = snapshot.immatriculation();
     GeoPoint target = snapshot.assignmentTarget();
     VehicleStatus status = snapshot.status();
+    IncidentCoordinator coordinator = fleet.incidentCoordinator();
 
     if (target != null && status == VehicleStatus.ENGAGE) {
       if (movementModel.isAtTarget(snapshot.position(), target)) {
         fleet.markArrivedAtTarget(immat, nowMs);
+        coordinator.markArrived(immat, target, nowMs);
         logger.info("Vehicule arrive sur intervention: " + immat);
       }
     }
 
-    if (status == VehicleStatus.SUR_INTERVENTION && snapshot.arrivedAtTargetMs() > 0) {
-      long elapsed = nowMs - snapshot.arrivedAtTargetMs();
-      if (elapsed >= onSiteDurationMs) {
-        fleet.startReturn(immat);
-        // Marquer que cette route de retour est en attente de calcul
-        returnRoutePendingMs.put(immat, nowMs);
-        logger.info("Vehicule quitte l'intervention: " + immat);
+    if (target != null && status == VehicleStatus.SUR_INTERVENTION) {
+      if (coordinator.canReturn(target, nowMs, onSiteDurationMs)) {
+        String lastVehicle = coordinator.getLastArrivedVehicle(target);
+        for (String vehicleImmat : coordinator.getAssignedVehicles(target)) {
+          fleet.startReturn(vehicleImmat);
+          returnRoutePendingMs.put(vehicleImmat, nowMs);
+          logger.info("Vehicule quitte l'intervention: " + vehicleImmat);
+        }
+        sendToUart(
+            eventIncidentStatus, 1, lastVehicle, target, nowMs / 1_000L); // Tous sont partis
+        coordinator.clearIncident(target);
       }
     }
 
@@ -165,10 +178,7 @@ public final class VehicleSimulator {
     boolean intervalElapsed = lastSend == null || nowMs - lastSend >= statusSendIntervalMs;
 
     if (statusChanged || intervalElapsed) {
-      UartMessage message = sendStatusMessage(snapshot, timestampSeconds);
-      if (statusChanged) {
-        logger.info("UART STATUS CHANGE >> " + uartParser.serialize(message));
-      }
+      sendToUart(eventVehicleStatus, snapshot.status().code(), snapshot.immatriculation(), snapshot.position(), timestampSeconds);
       lastStatusSendMs.put(immat, nowMs);
       lastSentStatus.put(immat, currentStatus);
     }
@@ -192,8 +202,8 @@ public final class VehicleSimulator {
 
   private void sendPositionMessage(VehicleSnapshot snapshot, long timestampSeconds) {
     UartMessage message =
-        UartMessage.position(
-            positionEvent,
+        UartMessage.build(
+            eventPosition,
             snapshot.status().code(),
             snapshot.immatriculation(),
             snapshot.position(),
@@ -204,31 +214,39 @@ public final class VehicleSimulator {
     }
   }
 
-  private UartMessage sendStatusMessage(VehicleSnapshot snapshot, long timestampSeconds) {
+  private void sendToUart(String event, int status, String immatriculation, GeoPoint location, long timestampSeconds) {
     UartMessage message =
-        UartMessage.position(
-            statusEvent,
-            snapshot.status().code(),
-            snapshot.immatriculation(),
-            snapshot.position(),
-            timestampSeconds);
+        UartMessage.build(event, status, immatriculation, location, timestampSeconds);
     uartGateway.send(message);
     if (logSends) {
       logger.info("UART >> " + uartParser.serialize(message));
     }
-    return message;
   }
 
   private long positionSendIntervalMs(VehicleSnapshot snapshot) {
     GeoPoint base = snapshot.base();
     if (base != null && movementModel.isAtTarget(snapshot.position(), base)) {
-      return baseSendIntervalMs;
+      return baseSendIntervalWithJitterMs(snapshot.immatriculation());
     }
     // Vehicle is moving (either to incident or returning to base)
     if (snapshot.assignmentTarget() != null || snapshot.status() == VehicleStatus.RETOUR) {
       return movingSendIntervalMs;
     }
     return baseSendIntervalMs;
+  }
+
+  private long baseSendIntervalWithJitterMs(String immatriculation) {
+    if (baseSendJitterMs <= 0) {
+      return baseSendIntervalMs;
+    }
+    Long offset = baseSendOffsetsMs.get(immatriculation);
+    if (offset == null) {
+      offset =
+          ThreadLocalRandom.current().nextLong(-baseSendJitterMs, baseSendJitterMs + 1);
+      baseSendOffsetsMs.put(immatriculation, offset);
+    }
+    long interval = baseSendIntervalMs + offset;
+    return Math.max(1L, interval);
   }
 
   private void computeAndAssignReturnRoute(VehicleSnapshot snapshot) {
