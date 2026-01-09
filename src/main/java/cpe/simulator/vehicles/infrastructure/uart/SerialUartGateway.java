@@ -16,7 +16,7 @@ public final class SerialUartGateway implements UartGateway {
 
   private static final int MAX_LINE_LENGTH = 256;
   private static final int READ_BUFFER_SIZE = 256;
-  private static final long MIN_SEND_INTERVAL_MS = 50; // Rate limit: max 20 msg/s
+  private static final long MIN_SEND_INTERVAL_MS = 25; // Minimum interval between sends
 
   private final String portName;
   private final int baudRate;
