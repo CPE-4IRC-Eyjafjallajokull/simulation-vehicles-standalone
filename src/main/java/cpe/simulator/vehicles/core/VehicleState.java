@@ -10,6 +10,7 @@ public final class VehicleState {
   private final GeoPoint base;
   private GeoPoint position;
   private GeoPoint assignmentTarget;
+  private String incidentPhaseId;
   private RoutePlan routePlan;
   private VehicleStatus status = VehicleStatus.DISPONIBLE;
   private long arrivedAtTargetMs = -1;
@@ -25,12 +26,14 @@ public final class VehicleState {
   }
 
   public synchronized VehicleSnapshot snapshot() {
-    return new VehicleSnapshot(immatriculation, position, base, assignmentTarget, status, arrivedAtTargetMs);
+    return new VehicleSnapshot(
+        immatriculation, position, base, assignmentTarget, incidentPhaseId, status, arrivedAtTargetMs);
   }
 
-  public synchronized void setAssignment(GeoPoint target, RoutePlan plan) {
+  public synchronized void setAssignment(GeoPoint target, RoutePlan plan, String incidentPhaseId) {
     this.assignmentTarget = target;
     this.routePlan = plan;
+    this.incidentPhaseId = incidentPhaseId;
     this.status = VehicleStatus.ENGAGE;
     this.arrivedAtTargetMs = -1;
   }
@@ -83,6 +86,7 @@ public final class VehicleState {
   public synchronized void assignToBase() {
     this.assignmentTarget = null;
     this.routePlan = null;
+    this.incidentPhaseId = null;
     this.status = VehicleStatus.DISPONIBLE;
     this.arrivedAtTargetMs = -1;
   }

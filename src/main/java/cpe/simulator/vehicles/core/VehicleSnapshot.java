@@ -9,5 +9,6 @@ public record VehicleSnapshot(
     GeoPoint position,
     GeoPoint base,
     GeoPoint assignmentTarget,
+    String incidentPhaseId,
     VehicleStatus status,
     long arrivedAtTargetMs) {}

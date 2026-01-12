@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import cpe.simulator.vehicles.api.Logger;
 import cpe.simulator.vehicles.api.RouteService;
 import cpe.simulator.vehicles.api.UartGateway;
+import cpe.simulator.vehicles.api.VehicleAssignmentService;
 import cpe.simulator.vehicles.api.VehicleRepository;
 import cpe.simulator.vehicles.config.SimulatorConfig;
 import cpe.simulator.vehicles.core.AssignmentEventHandler;
@@ -19,6 +20,7 @@ import cpe.simulator.vehicles.infrastructure.http.HttpApiClient;
 import cpe.simulator.vehicles.infrastructure.http.KeycloakAuthStrategy;
 import cpe.simulator.vehicles.infrastructure.sdmis.SdmisVehicleRepository;
 import cpe.simulator.vehicles.infrastructure.sdmis.SdmisRouteService;
+import cpe.simulator.vehicles.infrastructure.sdmis.SdmisVehicleAssignmentService;
 import cpe.simulator.vehicles.infrastructure.uart.SerialUartGateway;
 import cpe.simulator.vehicles.uart.UartMessageParser;
 import java.io.IOException;
@@ -56,11 +58,18 @@ public final class SimulatorFactory {
             logger);
 
     RouteService routeService = new SdmisRouteService(apiClient, logger);
+    VehicleAssignmentService assignmentService =
+        new SdmisVehicleAssignmentService(apiClient, logger);
 
     UartMessageRouter router = new UartMessageRouter(logger);
     router.register(
         new AssignmentEventHandler(
-            config.uartEventAffectation(), fleet, routeService, config.routeSnapStart(), logger));
+            config.uartEventAffectation(),
+            fleet,
+            routeService,
+            assignmentService,
+            config.routeSnapStart(),
+            logger));
 
     MovementModel movementModel =
         new MovementModel(config.vehicleSpeedMps(), config.positionEpsilonMeters());

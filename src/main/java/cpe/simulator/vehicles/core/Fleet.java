@@ -44,13 +44,18 @@ public final class Fleet {
     return state.snapshot();
   }
 
-  public boolean setAssignment(String immatriculation, GeoPoint target, RoutePlan plan) {
+  public boolean setAssignment(
+      String immatriculation, GeoPoint target, RoutePlan plan, String incidentPhaseId) {
     VehicleState state = vehicles.get(immatriculation);
     if (state == null) {
       return false;
     }
-    state.setAssignment(target, plan);
-    incidentCoordinator.registerVehicle(immatriculation, target);
+    if (incidentPhaseId == null || incidentPhaseId.isBlank()) {
+      logger.warn("Affectation ignoree (phase manquante): " + immatriculation);
+      return false;
+    }
+    state.setAssignment(target, plan, incidentPhaseId);
+    incidentCoordinator.registerVehicle(immatriculation, incidentPhaseId, target);
     return true;
   }
 

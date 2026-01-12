@@ -117,28 +117,36 @@ public final class VehicleSimulator {
   private void handleStatusTransitions(VehicleSnapshot snapshot, long nowMs) {
     String immat = snapshot.immatriculation();
     GeoPoint target = snapshot.assignmentTarget();
+    String incidentPhaseId = snapshot.incidentPhaseId();
     VehicleStatus status = snapshot.status();
     IncidentCoordinator coordinator = fleet.incidentCoordinator();
 
-    if (target != null && status == VehicleStatus.ENGAGE) {
+    if (target != null && incidentPhaseId != null && status == VehicleStatus.ENGAGE) {
       if (movementModel.isAtTarget(snapshot.position(), target)) {
         fleet.markArrivedAtTarget(immat, nowMs);
-        coordinator.markArrived(immat, target, nowMs);
+        coordinator.markArrived(immat, incidentPhaseId, nowMs, target);
         logger.info("Vehicule arrive sur intervention: " + immat);
       }
     }
 
-    if (target != null && status == VehicleStatus.SUR_INTERVENTION) {
-      if (coordinator.canReturn(target, nowMs, onSiteDurationMs)) {
-        String lastVehicle = coordinator.getLastArrivedVehicle(target);
-        for (String vehicleImmat : coordinator.getAssignedVehicles(target)) {
+    if (target != null && incidentPhaseId != null && status == VehicleStatus.SUR_INTERVENTION) {
+      if (coordinator.canReturn(incidentPhaseId, nowMs, onSiteDurationMs)) {
+        String lastVehicle = coordinator.getLastArrivedVehicle(incidentPhaseId);
+        GeoPoint phaseTarget = coordinator.getTarget(incidentPhaseId);
+        if (phaseTarget == null) {
+          phaseTarget = target;
+        }
+        if (lastVehicle == null) {
+          lastVehicle = immat;
+        }
+        for (String vehicleImmat : coordinator.getAssignedVehicles(incidentPhaseId)) {
           fleet.startReturn(vehicleImmat);
           returnRoutePendingMs.put(vehicleImmat, nowMs);
           logger.info("Vehicule quitte l'intervention: " + vehicleImmat);
         }
         sendToUart(
-            eventIncidentStatus, 1, lastVehicle, target, nowMs / 1_000L); // Tous sont partis
-        coordinator.clearIncident(target);
+            eventIncidentStatus, 1, lastVehicle, phaseTarget, nowMs / 1_000L); // Tous sont partis
+        coordinator.clearIncident(incidentPhaseId);
       }
     }
 
