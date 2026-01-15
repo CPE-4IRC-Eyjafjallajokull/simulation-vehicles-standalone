@@ -19,23 +19,14 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy (${{ matrix.target.name }})
+    name: Deploy to Production
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
       packages: read
-    strategy:
-      matrix:
-        target:
-          - name: production
-            environment: PROD
-            install_dir: /opt/mathislambert.fr/applications/simulation-vehicles-standalone
-          - name: raspberrypi
-            environment: RPI
-            install_dir: /opt/raspberrypi/applications/simulation-vehicles-standalone
     environment:
-      name: ${{ matrix.target.environment }}
+      name: PROD
 
     steps:
       - name: Checkout
@@ -43,31 +34,31 @@ jobs:
 
       - name: Wait for image to propagate to GHCR
         run: |
-          echo "Waiting 30 seconds for image to propagate to GHCR..."
+          echo "⏳ Waiting 30 seconds for image to propagate to GHCR..."
           sleep 30
-          echo "Ready to deploy."
+          echo "✅ Ready to deploy!"
 
       - name: Prepare deploy directory
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
+          host: ${{ secrets.ML_DEPLOY_HOST }}
+          username: ${{ secrets.ML_DEPLOY_USER }}
+          key: ${{ secrets.ML_DEPLOY_KEY }}
+          port: ${{ secrets.ML_DEPLOY_PORT }}
           script_stop: true
           script: |
             set -e
-            mkdir -p ${{ matrix.target.install_dir }}
+            mkdir -p /opt/mathislambert.fr/applications/simulation-vehicles-standalone
 
       - name: Upload compose file to server
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
+          host: ${{ secrets.ML_DEPLOY_HOST }}
+          username: ${{ secrets.ML_DEPLOY_USER }}
+          key: ${{ secrets.ML_DEPLOY_KEY }}
+          port: ${{ secrets.ML_DEPLOY_PORT }}
           source: "compose.prod.yaml"
-          target: "${{ matrix.target.install_dir }}"
+          target: "/opt/mathislambert.fr/applications/simulation-vehicles-standalone"
 
       - name: Remote deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -98,10 +89,10 @@ jobs:
           ROUTE_SNAP_START: ${{ vars.ROUTE_SNAP_START || 'true' }}
           ON_SITE_DURATION_MS: ${{ vars.ON_SITE_DURATION_MS || '60000' }}
         with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
+          host: ${{ secrets.ML_DEPLOY_HOST }}
+          username: ${{ secrets.ML_DEPLOY_USER }}
+          key: ${{ secrets.ML_DEPLOY_KEY }}
+          port: ${{ secrets.ML_DEPLOY_PORT }}
           script_stop: true
           envs: GITHUB_REF_NAME,GITHUB_REF_TYPE,RABBITMQ_DSN,RABBITMQ_QUEUE_TELEMETRY,RABBITMQ_QUEUE_ASSIGNMENTS,RABBITMQ_QUEUE_INCIDENT_TELEMETRY,RABBITMQ_EVENT_POSITION,RABBITMQ_EVENT_VEHICLE_STATUS,RABBITMQ_EVENT_INCIDENT_STATUS,RABBITMQ_EVENT_ASSIGNMENT,RETRY_SLEEP,KEYCLOAK_ISSUER,KEYCLOAK_CLIENT_ID,KEYCLOAK_CLIENT_SECRET,KEYCLOAK_TIMEOUT_MS,KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS,SDMIS_API_BASE_URL,SDMIS_API_TIMEOUT_MS,SIM_TICK_MS,VEHICLE_SPEED_MPS,POSITION_EPSILON_METERS,TELEMETRY_BASE_SEND_INTERVAL_MS,TELEMETRY_MOVING_SEND_INTERVAL_MS,TELEMETRY_STATUS_SEND_INTERVAL_MS,TELEMETRY_LOG_PUBLISHES,ROUTE_SNAP_START,ON_SITE_DURATION_MS
           script: |
@@ -109,7 +100,7 @@ jobs:
             OWNER='${{ github.repository_owner }}'
             TAG="$GITHUB_REF_NAME"
             REF_TYPE="$GITHUB_REF_TYPE"
-            INSTALL_DIR="${{ matrix.target.install_dir }}"
+            INSTALL_DIR=/opt/mathislambert.fr/applications/simulation-vehicles-standalone
             OWNER_LC=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
 
             # Login to GHCR
@@ -192,4 +183,4 @@ jobs:
             # Cleanup old images
             docker image prune -f || true
 
-            echo "Deployment completed successfully."
+            echo "✅ Deployment completed successfully!"
