@@ -32,3 +32,9 @@ services:
       - ROUTE_SNAP_START=${ROUTE_SNAP_START:-true}
       - ON_SITE_DURATION_MS=${ON_SITE_DURATION_MS:-60000}
     restart: unless-stopped
+
+networks:
+  proxy:
+    external: true
+  databases:
+    external: true
