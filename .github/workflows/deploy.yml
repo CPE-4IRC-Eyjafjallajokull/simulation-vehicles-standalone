@@ -1,0 +1,195 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["Docker Build & Push"]
+    types:
+      - completed
+    branches: [main]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy (${{ matrix.target.name }})
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      matrix:
+        target:
+          - name: production
+            environment: PROD
+            install_dir: /opt/mathislambert.fr/applications/simulation-vehicles-standalone
+          - name: raspberrypi
+            environment: RPI
+            install_dir: /opt/raspberrypi/applications/simulation-vehicles-standalone
+    environment:
+      name: ${{ matrix.target.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Wait for image to propagate to GHCR
+        run: |
+          echo "Waiting 30 seconds for image to propagate to GHCR..."
+          sleep 30
+          echo "Ready to deploy."
+
+      - name: Prepare deploy directory
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          script: |
+            set -e
+            mkdir -p ${{ matrix.target.install_dir }}
+
+      - name: Upload compose file to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: "compose.prod.yaml"
+          target: "${{ matrix.target.install_dir }}"
+
+      - name: Remote deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          RABBITMQ_DSN: ${{ secrets.RABBITMQ_DSN }}
+          RABBITMQ_QUEUE_TELEMETRY: ${{ vars.RABBITMQ_QUEUE_TELEMETRY || 'vehicle_telemetry' }}
+          RABBITMQ_QUEUE_ASSIGNMENTS: ${{ vars.RABBITMQ_QUEUE_ASSIGNMENTS || 'vehicle_assignments' }}
+          RABBITMQ_QUEUE_INCIDENT_TELEMETRY: ${{ vars.RABBITMQ_QUEUE_INCIDENT_TELEMETRY || 'incident_telemetry' }}
+          RABBITMQ_EVENT_POSITION: ${{ vars.RABBITMQ_EVENT_POSITION || 'vehicle_position_update' }}
+          RABBITMQ_EVENT_VEHICLE_STATUS: ${{ vars.RABBITMQ_EVENT_VEHICLE_STATUS || 'vehicle_status_update' }}
+          RABBITMQ_EVENT_INCIDENT_STATUS: ${{ vars.RABBITMQ_EVENT_INCIDENT_STATUS || 'incident_status_update' }}
+          RABBITMQ_EVENT_ASSIGNMENT: ${{ vars.RABBITMQ_EVENT_ASSIGNMENT || 'vehicle_assignment' }}
+          RETRY_SLEEP: ${{ vars.RETRY_SLEEP || '1.0' }}
+          KEYCLOAK_ISSUER: ${{ vars.KEYCLOAK_ISSUER || 'http://localhost:8080/realms/sdmis' }}
+          KEYCLOAK_CLIENT_ID: ${{ secrets.KEYCLOAK_CLIENT_ID }}
+          KEYCLOAK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+          KEYCLOAK_TIMEOUT_MS: ${{ vars.KEYCLOAK_TIMEOUT_MS || '3000' }}
+          KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS: ${{ vars.KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS || '30' }}
+          SDMIS_API_BASE_URL: ${{ vars.SDMIS_API_BASE_URL || 'http://localhost:3001' }}
+          SDMIS_API_TIMEOUT_MS: ${{ vars.SDMIS_API_TIMEOUT_MS || '5000' }}
+          SIM_TICK_MS: ${{ vars.SIM_TICK_MS || '200' }}
+          VEHICLE_SPEED_MPS: ${{ vars.VEHICLE_SPEED_MPS || '16.67' }}
+          POSITION_EPSILON_METERS: ${{ vars.POSITION_EPSILON_METERS || '20.0' }}
+          TELEMETRY_BASE_SEND_INTERVAL_MS: ${{ vars.TELEMETRY_BASE_SEND_INTERVAL_MS || '30000' }}
+          TELEMETRY_MOVING_SEND_INTERVAL_MS: ${{ vars.TELEMETRY_MOVING_SEND_INTERVAL_MS || '1000' }}
+          TELEMETRY_STATUS_SEND_INTERVAL_MS: ${{ vars.TELEMETRY_STATUS_SEND_INTERVAL_MS || '5000' }}
+          TELEMETRY_LOG_PUBLISHES: ${{ vars.TELEMETRY_LOG_PUBLISHES || 'false' }}
+          ROUTE_SNAP_START: ${{ vars.ROUTE_SNAP_START || 'true' }}
+          ON_SITE_DURATION_MS: ${{ vars.ON_SITE_DURATION_MS || '60000' }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          envs: GITHUB_REF_NAME,GITHUB_REF_TYPE,RABBITMQ_DSN,RABBITMQ_QUEUE_TELEMETRY,RABBITMQ_QUEUE_ASSIGNMENTS,RABBITMQ_QUEUE_INCIDENT_TELEMETRY,RABBITMQ_EVENT_POSITION,RABBITMQ_EVENT_VEHICLE_STATUS,RABBITMQ_EVENT_INCIDENT_STATUS,RABBITMQ_EVENT_ASSIGNMENT,RETRY_SLEEP,KEYCLOAK_ISSUER,KEYCLOAK_CLIENT_ID,KEYCLOAK_CLIENT_SECRET,KEYCLOAK_TIMEOUT_MS,KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS,SDMIS_API_BASE_URL,SDMIS_API_TIMEOUT_MS,SIM_TICK_MS,VEHICLE_SPEED_MPS,POSITION_EPSILON_METERS,TELEMETRY_BASE_SEND_INTERVAL_MS,TELEMETRY_MOVING_SEND_INTERVAL_MS,TELEMETRY_STATUS_SEND_INTERVAL_MS,TELEMETRY_LOG_PUBLISHES,ROUTE_SNAP_START,ON_SITE_DURATION_MS
+          script: |
+            set -euo pipefail
+            OWNER='${{ github.repository_owner }}'
+            TAG="$GITHUB_REF_NAME"
+            REF_TYPE="$GITHUB_REF_TYPE"
+            INSTALL_DIR="${{ matrix.target.install_dir }}"
+            OWNER_LC=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
+
+            # Login to GHCR
+            if [ -n '${{ secrets.GITHUB_TOKEN }}' ]; then
+              printf '%s' '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+            fi
+
+            if [ "$REF_TYPE" != "tag" ]; then
+              TAG=latest
+            fi
+
+            # Set defaults
+            TAG=${TAG:-latest}
+            RABBITMQ_DSN=${RABBITMQ_DSN:-amqp://sdmis:sdmis@localhost:5672/sdmis}
+            RABBITMQ_QUEUE_TELEMETRY=${RABBITMQ_QUEUE_TELEMETRY:-vehicle_telemetry}
+            RABBITMQ_QUEUE_ASSIGNMENTS=${RABBITMQ_QUEUE_ASSIGNMENTS:-vehicle_assignments}
+            RABBITMQ_QUEUE_INCIDENT_TELEMETRY=${RABBITMQ_QUEUE_INCIDENT_TELEMETRY:-incident_telemetry}
+            RABBITMQ_EVENT_POSITION=${RABBITMQ_EVENT_POSITION:-vehicle_position_update}
+            RABBITMQ_EVENT_VEHICLE_STATUS=${RABBITMQ_EVENT_VEHICLE_STATUS:-vehicle_status_update}
+            RABBITMQ_EVENT_INCIDENT_STATUS=${RABBITMQ_EVENT_INCIDENT_STATUS:-incident_status_update}
+            RABBITMQ_EVENT_ASSIGNMENT=${RABBITMQ_EVENT_ASSIGNMENT:-vehicle_assignment}
+            RETRY_SLEEP=${RETRY_SLEEP:-1.0}
+            KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER:-http://localhost:8080/realms/sdmis}
+            KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-}
+            KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:-}
+            KEYCLOAK_TIMEOUT_MS=${KEYCLOAK_TIMEOUT_MS:-3000}
+            KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS=${KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS:-30}
+            SDMIS_API_BASE_URL=${SDMIS_API_BASE_URL:-http://localhost:3001}
+            SDMIS_API_TIMEOUT_MS=${SDMIS_API_TIMEOUT_MS:-5000}
+            SIM_TICK_MS=${SIM_TICK_MS:-200}
+            VEHICLE_SPEED_MPS=${VEHICLE_SPEED_MPS:-16.67}
+            POSITION_EPSILON_METERS=${POSITION_EPSILON_METERS:-20.0}
+            TELEMETRY_BASE_SEND_INTERVAL_MS=${TELEMETRY_BASE_SEND_INTERVAL_MS:-30000}
+            TELEMETRY_MOVING_SEND_INTERVAL_MS=${TELEMETRY_MOVING_SEND_INTERVAL_MS:-1000}
+            TELEMETRY_STATUS_SEND_INTERVAL_MS=${TELEMETRY_STATUS_SEND_INTERVAL_MS:-5000}
+            TELEMETRY_LOG_PUBLISHES=${TELEMETRY_LOG_PUBLISHES:-false}
+            ROUTE_SNAP_START=${ROUTE_SNAP_START:-true}
+            ON_SITE_DURATION_MS=${ON_SITE_DURATION_MS:-60000}
+
+            if [ -z "$KEYCLOAK_CLIENT_ID" ] || [ -z "$KEYCLOAK_CLIENT_SECRET" ]; then
+              echo "KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET must be provided" >&2
+              exit 1
+            fi
+
+            mkdir -p "$INSTALL_DIR"
+            cd "$INSTALL_DIR"
+
+            # Pull latest image
+            OWNER="$OWNER_LC" IMAGE_TAG="$TAG" docker compose -f compose.prod.yaml pull
+
+            # Deploy with environment variables
+            OWNER="$OWNER_LC" IMAGE_TAG="$TAG" \
+              RABBITMQ_DSN="$RABBITMQ_DSN" \
+              RABBITMQ_QUEUE_TELEMETRY="$RABBITMQ_QUEUE_TELEMETRY" \
+              RABBITMQ_QUEUE_ASSIGNMENTS="$RABBITMQ_QUEUE_ASSIGNMENTS" \
+              RABBITMQ_QUEUE_INCIDENT_TELEMETRY="$RABBITMQ_QUEUE_INCIDENT_TELEMETRY" \
+              RABBITMQ_EVENT_POSITION="$RABBITMQ_EVENT_POSITION" \
+              RABBITMQ_EVENT_VEHICLE_STATUS="$RABBITMQ_EVENT_VEHICLE_STATUS" \
+              RABBITMQ_EVENT_INCIDENT_STATUS="$RABBITMQ_EVENT_INCIDENT_STATUS" \
+              RABBITMQ_EVENT_ASSIGNMENT="$RABBITMQ_EVENT_ASSIGNMENT" \
+              RETRY_SLEEP="$RETRY_SLEEP" \
+              KEYCLOAK_ISSUER="$KEYCLOAK_ISSUER" \
+              KEYCLOAK_CLIENT_ID="$KEYCLOAK_CLIENT_ID" \
+              KEYCLOAK_CLIENT_SECRET="$KEYCLOAK_CLIENT_SECRET" \
+              KEYCLOAK_TIMEOUT_MS="$KEYCLOAK_TIMEOUT_MS" \
+              KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS="$KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS" \
+              SDMIS_API_BASE_URL="$SDMIS_API_BASE_URL" \
+              SDMIS_API_TIMEOUT_MS="$SDMIS_API_TIMEOUT_MS" \
+              SIM_TICK_MS="$SIM_TICK_MS" \
+              VEHICLE_SPEED_MPS="$VEHICLE_SPEED_MPS" \
+              POSITION_EPSILON_METERS="$POSITION_EPSILON_METERS" \
+              TELEMETRY_BASE_SEND_INTERVAL_MS="$TELEMETRY_BASE_SEND_INTERVAL_MS" \
+              TELEMETRY_MOVING_SEND_INTERVAL_MS="$TELEMETRY_MOVING_SEND_INTERVAL_MS" \
+              TELEMETRY_STATUS_SEND_INTERVAL_MS="$TELEMETRY_STATUS_SEND_INTERVAL_MS" \
+              TELEMETRY_LOG_PUBLISHES="$TELEMETRY_LOG_PUBLISHES" \
+              ROUTE_SNAP_START="$ROUTE_SNAP_START" \
+              ON_SITE_DURATION_MS="$ON_SITE_DURATION_MS" \
+              docker compose -f compose.prod.yaml up -d --remove-orphans
+
+            # Cleanup old images
+            docker image prune -f || true
+
+            echo "Deployment completed successfully."
