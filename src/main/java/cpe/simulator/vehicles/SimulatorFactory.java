@@ -6,14 +6,13 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import cpe.simulator.vehicles.api.Logger;
 import cpe.simulator.vehicles.api.RouteService;
-import cpe.simulator.vehicles.api.UartGateway;
+import cpe.simulator.vehicles.api.TelemetryGateway;
 import cpe.simulator.vehicles.api.VehicleAssignmentService;
 import cpe.simulator.vehicles.api.VehicleRepository;
 import cpe.simulator.vehicles.config.SimulatorConfig;
 import cpe.simulator.vehicles.core.AssignmentEventHandler;
 import cpe.simulator.vehicles.core.Fleet;
 import cpe.simulator.vehicles.core.MovementModel;
-import cpe.simulator.vehicles.core.UartMessageRouter;
 import cpe.simulator.vehicles.core.VehicleSimulator;
 import cpe.simulator.vehicles.infrastructure.http.AuthStrategy;
 import cpe.simulator.vehicles.infrastructure.http.HttpApiClient;
@@ -21,8 +20,7 @@ import cpe.simulator.vehicles.infrastructure.http.KeycloakAuthStrategy;
 import cpe.simulator.vehicles.infrastructure.sdmis.SdmisVehicleRepository;
 import cpe.simulator.vehicles.infrastructure.sdmis.SdmisRouteService;
 import cpe.simulator.vehicles.infrastructure.sdmis.SdmisVehicleAssignmentService;
-import cpe.simulator.vehicles.infrastructure.uart.SerialUartGateway;
-import cpe.simulator.vehicles.uart.UartMessageParser;
+import cpe.simulator.vehicles.infrastructure.rabbitmq.RabbitMqTelemetryGateway;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -46,30 +44,32 @@ public final class SimulatorFactory {
     VehicleRepository repository = new SdmisVehicleRepository(apiClient, logger);
     Fleet fleet = new Fleet(repository.loadVehicles(), logger);
 
-    UartMessageParser parser = new UartMessageParser();
-    UartGateway uartGateway =
-        new SerialUartGateway(
-            config.uartPort(),
-            config.uartBaud(),
-            config.uartReconnectMs(),
-            config.uartReadTimeoutMs(),
-            config.uartWriteDelayMs(),
-            parser,
+    TelemetryGateway telemetryGateway =
+        new RabbitMqTelemetryGateway(
+            config.rabbitmqDsn(),
+            config.rabbitmqQueueTelemetry(),
+            config.rabbitmqQueueAssignments(),
+            config.rabbitmqQueueIncidentTelemetry(),
+            config.rabbitmqEventPosition(),
+            config.rabbitmqEventVehicleStatus(),
+            config.rabbitmqEventIncidentStatus(),
+            config.rabbitmqEventAssignment(),
+            config.rabbitmqRetrySleepMs(),
+            config.telemetryLogPublishes(),
+            mapper,
             logger);
 
     RouteService routeService = new SdmisRouteService(apiClient, logger);
     VehicleAssignmentService assignmentService =
         new SdmisVehicleAssignmentService(apiClient, logger);
 
-    UartMessageRouter router = new UartMessageRouter(logger);
-    router.register(
+    AssignmentEventHandler assignmentHandler =
         new AssignmentEventHandler(
-            config.uartEventAffectation(),
             fleet,
             routeService,
             assignmentService,
             config.routeSnapStart(),
-            logger));
+            logger);
 
     MovementModel movementModel =
         new MovementModel(config.vehicleSpeedMps(), config.positionEpsilonMeters());
@@ -77,19 +77,15 @@ public final class SimulatorFactory {
     return new VehicleSimulator(
         fleet,
         movementModel,
-        uartGateway,
-        router,
+        telemetryGateway,
+        assignmentHandler,
         logger,
         Clock.systemUTC(),
         config.simTickMs(),
-        config.uartBaseSendIntervalMs(),
-        config.uartMovingSendIntervalMs(),
-        config.uartStatusSendIntervalMs(),
+        config.telemetryBaseSendIntervalMs(),
+        config.telemetryMovingSendIntervalMs(),
+        config.telemetryStatusSendIntervalMs(),
         config.onSiteDurationMs(),
-        config.uartEventPosition(),
-        config.uartEventVehicleStatus(),
-        config.uartEventIncidentStatus(),
-        config.uartLogSends(),
         routeService,
         config.routeSnapStart());
   }

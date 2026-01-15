@@ -1,16 +1,14 @@
 package cpe.simulator.vehicles.core;
 
+import cpe.simulator.vehicles.api.AssignmentMessageListener;
 import cpe.simulator.vehicles.api.Logger;
 import cpe.simulator.vehicles.api.RouteService;
 import cpe.simulator.vehicles.api.VehicleAssignmentService;
 import cpe.simulator.vehicles.domain.GeoPoint;
-import cpe.simulator.vehicles.uart.UartEventHandler;
-import cpe.simulator.vehicles.uart.UartMessage;
+import cpe.simulator.vehicles.messaging.AssignmentMessage;
 
 /** Handler d'affectation de vehicule vers un incident. */
-public final class AssignmentEventHandler implements UartEventHandler {
-
-  private final String eventName;
+public final class AssignmentEventHandler implements AssignmentMessageListener {
   private final Fleet fleet;
   private final RouteService routeService;
   private final VehicleAssignmentService assignmentService;
@@ -18,13 +16,11 @@ public final class AssignmentEventHandler implements UartEventHandler {
   private final Logger logger;
 
   public AssignmentEventHandler(
-      String eventName,
       Fleet fleet,
       RouteService routeService,
       VehicleAssignmentService assignmentService,
       boolean snapStart,
       Logger logger) {
-    this.eventName = eventName;
     this.fleet = fleet;
     this.routeService = routeService;
     this.assignmentService = assignmentService;
@@ -33,12 +29,10 @@ public final class AssignmentEventHandler implements UartEventHandler {
   }
 
   @Override
-  public String eventName() {
-    return eventName;
-  }
-
-  @Override
-  public void handle(UartMessage message) {
+  public void onAssignment(AssignmentMessage message) {
+    if (message == null) {
+      return;
+    }
     GeoPoint target = new GeoPoint(message.latitude(), message.longitude());
     VehicleSnapshot snapshot = fleet.snapshotFor(message.immatriculation());
     if (snapshot == null) {

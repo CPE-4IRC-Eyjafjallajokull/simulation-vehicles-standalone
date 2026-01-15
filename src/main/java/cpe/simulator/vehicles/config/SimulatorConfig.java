@@ -19,26 +19,26 @@ public record SimulatorConfig(
     String apiBaseUrl,
     long apiTimeoutMs,
 
+    // RabbitMQ
+    String rabbitmqDsn,
+    String rabbitmqQueueTelemetry,
+    String rabbitmqQueueAssignments,
+    String rabbitmqQueueIncidentTelemetry,
+    String rabbitmqEventPosition,
+    String rabbitmqEventVehicleStatus,
+    String rabbitmqEventIncidentStatus,
+    String rabbitmqEventAssignment,
+    long rabbitmqRetrySleepMs,
+
     // Simulation
     long simTickMs,
     double vehicleSpeedMps,
     double positionEpsilonMeters,
-
-    // UART
-    String uartPort,
-    int uartBaud,
-    long uartReconnectMs,
-    int uartReadTimeoutMs,
-    long uartWriteDelayMs,
-    long uartBaseSendIntervalMs,
-    long uartMovingSendIntervalMs,
-    long uartStatusSendIntervalMs,
-    String uartEventPosition,
-    String uartEventVehicleStatus,
-    String uartEventIncidentStatus,
-    String uartEventAffectation,
+    long telemetryBaseSendIntervalMs,
+    long telemetryMovingSendIntervalMs,
+    long telemetryStatusSendIntervalMs,
+    boolean telemetryLogPublishes,
     boolean routeSnapStart,
-    boolean uartLogSends,
 
     // Intervention
     long onSiteDurationMs) {
@@ -54,23 +54,23 @@ public record SimulatorConfig(
         parseLong(env, "KEYCLOAK_TOKEN_EXPIRY_SKEW_SECONDS", 30L),
         env.getOrDefault("SDMIS_API_BASE_URL", "http://localhost:3001"),
         parseLong(env, "SDMIS_API_TIMEOUT_MS", 5_000L),
+        env.getOrDefault("RABBITMQ_DSN", "amqp://sdmis:sdmis@localhost:5672/sdmis"),
+        env.getOrDefault("RABBITMQ_QUEUE_TELEMETRY", "vehicle_telemetry"),
+        env.getOrDefault("RABBITMQ_QUEUE_ASSIGNMENTS", "vehicle_assignments"),
+        env.getOrDefault("RABBITMQ_QUEUE_INCIDENT_TELEMETRY", "incident_telemetry"),
+        env.getOrDefault("RABBITMQ_EVENT_POSITION", "vehicle_position_update"),
+        env.getOrDefault("RABBITMQ_EVENT_VEHICLE_STATUS", "vehicle_status_update"),
+        env.getOrDefault("RABBITMQ_EVENT_INCIDENT_STATUS", "incident_status_update"),
+        env.getOrDefault("RABBITMQ_EVENT_ASSIGNMENT", "vehicle_assignment"),
+        parseRetrySleepMs(env, "RETRY_SLEEP", 1.0),
         parseLong(env, "SIM_TICK_MS", 200L),
-        parseDouble(env, "VEHICLE_SPEED_MPS", 13.89),
-        parseDouble(env, "POSITION_EPSILON_METERS", 50.0),
-        env.getOrDefault("UART_PORT", "/dev/ttyACM0"),
-        parseInt(env, "UART_BAUD", 115_200),
-        parseLong(env, "UART_RECONNECT_MS", 2_000L),
-        parseInt(env, "UART_READ_TIMEOUT_MS", 1_000),
-        parseLong(env, "UART_WRITE_DELAY_MS", 10L),
-        parseLong(env, "UART_BASE_SEND_INTERVAL_MS", 60_000L),
-        parseLong(env, "UART_MOVING_SEND_INTERVAL_MS", 500L),
-        parseLong(env, "UART_STATUS_SEND_INTERVAL_MS", 5_000L),
-        env.getOrDefault("UART_EVENT_POSITION", "vehicle_position"),
-        env.getOrDefault("UART_EVENT_VEHICLE_STATUS", "vehicle_status"),
-        env.getOrDefault("UART_EVENT_INCIDENT_STATUS", "incident_status"),
-        env.getOrDefault("UART_EVENT_AFFECTATION", "vehicle_affectation"),
+        parseDouble(env, "VEHICLE_SPEED_MPS", 16.67),
+        parseDouble(env, "POSITION_EPSILON_METERS", 20.0),
+        parseLong(env, "TELEMETRY_BASE_SEND_INTERVAL_MS", 30_000L),
+        parseLong(env, "TELEMETRY_MOVING_SEND_INTERVAL_MS", 1_000L),
+        parseLong(env, "TELEMETRY_STATUS_SEND_INTERVAL_MS", 5_000L),
+        parseBoolean(env, "TELEMETRY_LOG_PUBLISHES", false),
         parseBoolean(env, "ROUTE_SNAP_START", true),
-        parseBoolean(env, "UART_LOG_SENDS", false),
         parseLong(env, "ON_SITE_DURATION_MS", 60_000L));
   }
 
@@ -132,18 +132,6 @@ public record SimulatorConfig(
     }
   }
 
-  private static int parseInt(Map<String, String> env, String key, int defaultValue) {
-    String value = env.get(key);
-    if (value == null || value.isBlank()) {
-      return defaultValue;
-    }
-    try {
-      return Integer.parseInt(value);
-    } catch (NumberFormatException e) {
-      return defaultValue;
-    }
-  }
-
   private static double parseDouble(Map<String, String> env, String key, double defaultValue) {
     String value = env.get(key);
     if (value == null || value.isBlank()) {
@@ -162,5 +150,21 @@ public record SimulatorConfig(
       return defaultValue;
     }
     return Boolean.parseBoolean(value);
+  }
+
+  private static long parseRetrySleepMs(
+      Map<String, String> env, String key, double defaultValueSeconds) {
+    String value = env.get(key);
+    double seconds = defaultValueSeconds;
+    if (value != null && !value.isBlank()) {
+      try {
+        seconds = Double.parseDouble(value);
+      } catch (NumberFormatException ignored) {
+      }
+    }
+    if (seconds < 0) {
+      seconds = defaultValueSeconds;
+    }
+    return (long) (seconds * 1_000L);
   }
 }

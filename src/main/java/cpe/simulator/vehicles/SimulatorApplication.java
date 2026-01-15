@@ -12,7 +12,7 @@ public final class SimulatorApplication {
     Logger logger = new ConsoleLogger();
 
     try {
-      logger.info("Demarrage du simulateur de vehicules");
+      logger.info("Demarrage du simulateur de vehicules (standalone)");
 
       SimulatorConfig config = SimulatorConfig.fromEnvironment();
       VehicleSimulator simulator = SimulatorFactory.create(config, logger);

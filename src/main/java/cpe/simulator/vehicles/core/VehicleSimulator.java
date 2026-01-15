@@ -1,12 +1,11 @@
 package cpe.simulator.vehicles.core;
 
+import cpe.simulator.vehicles.api.AssignmentMessageListener;
 import cpe.simulator.vehicles.api.Logger;
 import cpe.simulator.vehicles.api.RouteService;
-import cpe.simulator.vehicles.api.UartGateway;
+import cpe.simulator.vehicles.api.TelemetryGateway;
 import cpe.simulator.vehicles.domain.GeoPoint;
 import cpe.simulator.vehicles.domain.VehicleStatus;
-import cpe.simulator.vehicles.uart.UartMessage;
-import cpe.simulator.vehicles.uart.UartMessageParser;
 import java.time.Clock;
 import java.util.HashMap;
 import java.util.Map;
@@ -17,8 +16,8 @@ public final class VehicleSimulator {
 
   private final Fleet fleet;
   private final MovementModel movementModel;
-  private final UartGateway uartGateway;
-  private final UartMessageRouter router;
+  private final TelemetryGateway telemetryGateway;
+  private final AssignmentMessageListener assignmentListener;
   private final Logger logger;
   private final Clock clock;
   private final long tickMs;
@@ -27,11 +26,6 @@ public final class VehicleSimulator {
   private final long statusSendIntervalMs;
   private final long onSiteDurationMs;
   private final long baseSendJitterMs;
-  private final String eventPosition;
-  private final String eventVehicleStatus;
-  private final String eventIncidentStatus;
-  private final boolean logSends;
-  private final UartMessageParser uartParser;
   private final RouteService routeService;
   private final boolean routeSnapStart;
   private final Map<String, Long> lastPositionSendMs = new HashMap<>();
@@ -44,8 +38,8 @@ public final class VehicleSimulator {
   public VehicleSimulator(
       Fleet fleet,
       MovementModel movementModel,
-      UartGateway uartGateway,
-      UartMessageRouter router,
+      TelemetryGateway telemetryGateway,
+      AssignmentMessageListener assignmentListener,
       Logger logger,
       Clock clock,
       long tickMs,
@@ -53,16 +47,12 @@ public final class VehicleSimulator {
       long movingSendIntervalMs,
       long statusSendIntervalMs,
       long onSiteDurationMs,
-      String eventPosition,
-      String eventVehicleStatus,
-      String eventIncidentStatus,
-      boolean logSends,
       RouteService routeService,
       boolean routeSnapStart) {
     this.fleet = fleet;
     this.movementModel = movementModel;
-    this.uartGateway = uartGateway;
-    this.router = router;
+    this.telemetryGateway = telemetryGateway;
+    this.assignmentListener = assignmentListener;
     this.logger = logger;
     this.clock = clock;
     this.tickMs = tickMs;
@@ -71,19 +61,14 @@ public final class VehicleSimulator {
     this.statusSendIntervalMs = statusSendIntervalMs;
     this.onSiteDurationMs = onSiteDurationMs;
     this.baseSendJitterMs = baseSendIntervalMs / 5;
-    this.eventPosition = eventPosition;
-    this.eventVehicleStatus = eventVehicleStatus;
-    this.eventIncidentStatus = eventIncidentStatus;
-    this.logSends = logSends;
     this.routeService = routeService;
     this.routeSnapStart = routeSnapStart;
-    this.uartParser = new UartMessageParser();
   }
 
   public void run() {
     logger.info("Vehicules charges: " + fleet.size());
     initializeVehiclesNotAtBase();
-    uartGateway.start(router);
+    telemetryGateway.start(assignmentListener);
 
     double tickSeconds = tickMs / 1_000.0;
 
@@ -110,7 +95,7 @@ public final class VehicleSimulator {
       Thread.currentThread().interrupt();
       logger.warn("Simulation interrompue");
     } finally {
-      uartGateway.close();
+      telemetryGateway.close();
     }
   }
 
@@ -132,10 +117,6 @@ public final class VehicleSimulator {
     if (target != null && incidentPhaseId != null && status == VehicleStatus.SUR_INTERVENTION) {
       if (coordinator.canReturn(incidentPhaseId, nowMs, onSiteDurationMs)) {
         String lastVehicle = coordinator.getLastArrivedVehicle(incidentPhaseId);
-        GeoPoint phaseTarget = coordinator.getTarget(incidentPhaseId);
-        if (phaseTarget == null) {
-          phaseTarget = target;
-        }
         if (lastVehicle == null) {
           lastVehicle = immat;
         }
@@ -144,8 +125,8 @@ public final class VehicleSimulator {
           returnRoutePendingMs.put(vehicleImmat, nowMs);
           logger.info("Vehicule quitte l'intervention: " + vehicleImmat);
         }
-        sendToUart(
-            eventIncidentStatus, 1, lastVehicle, phaseTarget, nowMs / 1_000L); // Tous sont partis
+        telemetryGateway.publishIncidentStatus(
+            lastVehicle, 1, nowMs / 1_000L); // Tous sont partis
         coordinator.clearIncident(incidentPhaseId);
       }
     }
@@ -171,7 +152,8 @@ public final class VehicleSimulator {
     Long last = lastPositionSendMs.get(immat);
 
     if (last == null || nowMs - last >= intervalMs) {
-      sendPositionMessage(snapshot, timestampSeconds);
+      telemetryGateway.publishVehiclePosition(
+          snapshot.immatriculation(), snapshot.position(), timestampSeconds);
       lastPositionSendMs.put(immat, nowMs);
     }
   }
@@ -186,7 +168,8 @@ public final class VehicleSimulator {
     boolean intervalElapsed = lastSend == null || nowMs - lastSend >= statusSendIntervalMs;
 
     if (statusChanged || intervalElapsed) {
-      sendToUart(eventVehicleStatus, snapshot.status().code(), snapshot.immatriculation(), snapshot.position(), timestampSeconds);
+      telemetryGateway.publishVehicleStatus(
+          snapshot.immatriculation(), snapshot.status(), timestampSeconds);
       lastStatusSendMs.put(immat, nowMs);
       lastSentStatus.put(immat, currentStatus);
     }
@@ -205,29 +188,6 @@ public final class VehicleSimulator {
               + previousStatus
               + " -> "
               + currentStatus);
-    }
-  }
-
-  private void sendPositionMessage(VehicleSnapshot snapshot, long timestampSeconds) {
-    UartMessage message =
-        UartMessage.build(
-            eventPosition,
-            snapshot.status().code(),
-            snapshot.immatriculation(),
-            snapshot.position(),
-            timestampSeconds);
-    uartGateway.send(message);
-    if (logSends) {
-      logger.info("UART >> " + uartParser.serialize(message));
-    }
-  }
-
-  private void sendToUart(String event, int status, String immatriculation, GeoPoint location, long timestampSeconds) {
-    UartMessage message =
-        UartMessage.build(event, status, immatriculation, location, timestampSeconds);
-    uartGateway.send(message);
-    if (logSends) {
-      logger.info("UART >> " + uartParser.serialize(message));
     }
   }
 

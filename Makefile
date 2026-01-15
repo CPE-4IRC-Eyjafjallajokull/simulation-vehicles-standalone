@@ -3,10 +3,9 @@ SHELL := /bin/sh
 MVN ?= mvn
 JAVA ?= java
 
-ARTIFACT_ID := simulateur_java_vehicles
+ARTIFACT_ID := simulateur_java_vehicles_standalone
 VERSION := 1.0-SNAPSHOT
 JAR := target/$(ARTIFACT_ID)-$(VERSION).jar
-JAVA_OPTS ?= --enable-native-access=ALL-UNNAMED
 
 .PHONY: help build run test clean package
 
@@ -22,7 +21,7 @@ build:
 	@$(MVN) -q -DskipTests package
 
 run: build
-	@$(JAVA) $(JAVA_OPTS) -jar $(JAR)
+	@$(JAVA) -jar $(JAR)
 
 test:
 	@$(MVN) -q test

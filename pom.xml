@@ -3,10 +3,10 @@
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>cpe.simulator.vehicles</groupId>
-  <artifactId>simulateur_java_vehicles</artifactId>
+  <artifactId>simulateur_java_vehicles_standalone</artifactId>
   <packaging>jar</packaging>
   <version>1.0-SNAPSHOT</version>
-  <name>simulateur_java_vehicles</name>
+  <name>simulateur_java_vehicles_standalone</name>
   <url>http://maven.apache.org</url>
   <properties>
     <maven.compiler.source>21</maven.compiler.source>
@@ -24,9 +24,9 @@
       <version>2.15.2</version>
     </dependency>
     <dependency>
-      <groupId>com.fazecast</groupId>
-      <artifactId>jSerialComm</artifactId>
-      <version>2.10.4</version>
+      <groupId>com.rabbitmq</groupId>
+      <artifactId>amqp-client</artifactId>
+      <version>5.21.0</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>

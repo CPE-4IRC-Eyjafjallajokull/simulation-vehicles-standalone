@@ -19,4 +19,16 @@ public enum VehicleStatus {
   public int code() {
     return code;
   }
+
+  public String label() {
+    return switch (this) {
+      case DISPONIBLE -> "Disponible";
+      case ENGAGE -> "Engagé";
+      case SUR_INTERVENTION -> "Sur intervention";
+      case TRANSPORT -> "Transport";
+      case RETOUR -> "Retour";
+      case INDISPONIBLE -> "Indisponible";
+      case HORS_SERVICE -> "Hors service";
+    };
+  }
 }
